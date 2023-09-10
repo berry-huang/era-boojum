@@ -2,7 +2,9 @@ use super::*;
 use crate::cs::gates::{assert_no_placeholder_variables, ConstantAllocatableCS, FmaGateInBaseFieldWithoutConstant, NopGate, PublicInputGate};
 use crate::cs::traits::cs::ConstraintSystem;
 use crate::cs::Variable;
+use crate::field::traits::field_like::PrimeFieldLikeVectorized;
 use crate::gadgets::tables::TriXor4Table;
+use crate::gadgets::traits::witnessable::WitnessHookable;
 use crate::gadgets::u32::UInt32;
 use crate::gadgets::u8::UInt8;
 
@@ -10,16 +12,68 @@ pub fn fibonacci<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     input: &UInt32<F>,
 ) -> UInt32<F> {
-    let one = UInt32::allocated_constant(cs,1);
-    let two = UInt32::allocated_constant(cs,2);
+    let zero = UInt32::allocate_checked(cs, 0);
+    let one = UInt32::allocate_checked(cs, 1);
+    let two = UInt32::allocate_checked(cs, 2);
+
+    let input_num = (input.witness_hook(&*cs))().unwrap();
+    if input_num == 0 {
+        return zero;
+    }
+    if input_num == 1 {
+        return one;
+    }
+    if input_num == 2 {
+        return one;
+    }
+    let mut grandparent = UInt32::allocate_checked(cs, 1);
+    let mut parent = UInt32::allocate_checked(cs, 1);
+    let mut me = UInt32::allocate_checked(cs, 1);
+    for i in 3..input_num + 1 {
+        me = grandparent.add_no_overflow(cs, parent);
+        grandparent = parent;
+        parent = me;
+    }
+    // if (UInt32::equals(cs, input, &one).witness_hook(&*cs))().unwrap() {
+    //     return one;
+    // }
+    // if (UInt32::equals(cs, input, &two).witness_hook(&*cs))().unwrap() {
+    //     return one;
+    // }
+    // let mut grandparent = UInt32::allocated_constant(cs,1);
+    // let mut parent = UInt32::allocated_constant(cs,1);
+    // let mut me = UInt32::allocated_constant(cs,1);
+    // for i in 3..(input.witness_hook(&*cs))().unwrap() + 1 {
+    //     me = grandparent.add_no_overflow(cs, parent);
+    //     grandparent = parent;
+    //     parent = me;
+    // }
+
     // let no_gate = NopGate::new();
     // no_gate.add_to_cs(cs);
 
-    one
+    me
 }
 
 pub fn l2_fibonacci(input: u32) -> u32 {
-    1
+    if input == 0 {
+        return 0;
+    }
+    if input == 1 {
+        return 1;
+    }
+    if input == 2 {
+        return 1;
+    }
+    let mut grandparent = 1;
+    let mut parent = 1;
+    let mut me = 0;
+    for i in 3..input + 1 {
+        me = grandparent + parent;
+        grandparent = parent;
+        parent = me;
+    }
+    me
 }
 
 #[cfg(test)]
@@ -45,13 +99,20 @@ mod test {
         log,
     };
     use blake2::Digest;
-    use crate::cs::gates::FmaGateInBaseFieldWithoutConstant;
+    use crate::cs::gates::{FmaGateInBaseFieldWithoutConstant, UIntXAddGate, ZeroCheckGate};
 
     type F = GoldilocksField;
 
     use crate::cs::traits::gate::GatePlacementStrategy;
     use crate::gadgets::tables::{ByteSplitTable, create_byte_split_table};
     use crate::gadgets::traits::witnessable::{CSWitnessable, WitnessHookable};
+
+    #[test]
+    #[ignore]
+    fn test_1() {
+        let input = 19;
+        println!("{}:{}", input, l2_fibonacci(input));
+    }
 
     #[test]
     #[ignore]
@@ -63,8 +124,8 @@ mod test {
     }
 
     fn prove_fibonacci<
-        T: TreeHasher<GoldilocksField, Output = TR::CompatibleCap>,
-        TR: Transcript<GoldilocksField, TransciptParameters = ()>,
+        T: TreeHasher<GoldilocksField, Output=TR::CompatibleCap>,
+        TR: Transcript<GoldilocksField, TransciptParameters=()>,
     >(n: u32) {
         use crate::config::SetupCSConfig;
         use crate::cs::implementations::prover::ProofConfig;
@@ -115,6 +176,10 @@ mod test {
                 builder,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
             builder
         }
@@ -124,7 +189,7 @@ mod test {
             use crate::config::DevCSConfig;
 
             let builder_impl =
-                CsReferenceImplementationBuilder::<F, F, DevCSConfig>::new(geometry, max_variables, max_trace_len,);
+                CsReferenceImplementationBuilder::<F, F, DevCSConfig>::new(geometry, max_variables, max_trace_len);
             let builder = new_builder::<_, F>(builder_impl);
 
             let builder = configure(builder);
@@ -146,8 +211,9 @@ mod test {
         use crate::cs::cs_builder_reference::*;
         use crate::cs::cs_builder_verifier::*;
 
+        use crate::config::DevCSConfig;
         let builder_impl =
-            CsReferenceImplementationBuilder::<F, P, SetupCSConfig>::new(geometry, max_variables, max_trace_len,);
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, max_variables, max_trace_len);
         let builder = new_builder::<_, F>(builder_impl);
 
         let builder = configure(builder);
@@ -169,7 +235,7 @@ mod test {
         use crate::config::ProvingCSConfig;
 
         let builder_impl = CsReferenceImplementationBuilder::<F, P, ProvingCSConfig>::new(
-            geometry, max_variables, max_trace_len,);
+            geometry, max_variables, max_trace_len, );
         let builder = new_builder::<_, F>(builder_impl);
 
         let builder = configure(builder);
