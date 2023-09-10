@@ -8,6 +8,7 @@ pub mod num;
 // pub mod poseidon;
 pub mod blake2s;
 pub mod curves;
+pub mod fibonacci;
 pub mod keccak256;
 pub mod non_native_field;
 pub mod poseidon2;
